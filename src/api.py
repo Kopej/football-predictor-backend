@@ -11,6 +11,7 @@ from src.predict import (
     build_prediction_output,
     load_all_artifacts,
     load_training_features,
+    predict_upcoming_fixtures_for_league,
 )
 
 app = FastAPI(
@@ -161,3 +162,11 @@ def predict_match(
 
     row = match_df.iloc[0]
     return build_prediction_output(row, ARTIFACTS)
+
+@app.get("/predict-upcoming")
+def predict_upcoming(
+    league: str = Query(..., description="League code, e.g. EPL"),
+    limit: int = Query(default=10, ge=1, le=50),
+) -> List[Dict[str, Any]]:
+    outputs = predict_upcoming_fixtures_for_league(league=league, limit=limit)
+    return outputs
