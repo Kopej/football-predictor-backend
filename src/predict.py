@@ -7,6 +7,8 @@ import joblib
 import pandas as pd
 
 from src.config import MODELS_DIR, PROCESSED_DATA_DIR
+from src.live_features import load_historical_matches, build_live_feature_row
+from src.live_fixtures import fetch_upcoming_fixtures, filter_fixtures_with_complete_odds
 
 
 TRAINING_FEATURES_PATH = PROCESSED_DATA_DIR / "training_features.csv"
@@ -319,6 +321,73 @@ def build_prediction_output(row: pd.Series, artifacts: Dict) -> Dict:
         },
     }
 
+def build_live_prediction_output(
+    fixture: Dict,
+    historical_df: pd.DataFrame,
+    artifacts: Dict,
+) -> Dict:
+    """
+    Build predictions for one upcoming live fixture.
+    """
+    row_df, metadata = build_live_feature_row(
+        historical_df=historical_df,
+        date=fixture["date"],
+        league=fixture["league"],
+        home_team=fixture["home_team"],
+        away_team=fixture["away_team"],
+        odds_home_win=fixture["odds_home_win"],
+        odds_draw=fixture["odds_draw"],
+        odds_away_win=fixture["odds_away_win"],
+    )
+
+    row = row_df.iloc[0]
+    output = build_prediction_output(row, artifacts)
+
+    # attach live odds + history note
+    output["match"]["odds"] = {
+        "home_win": fixture["odds_home_win"],
+        "draw": fixture["odds_draw"],
+        "away_win": fixture["odds_away_win"],
+    }
+
+    output["prediction_note"] = metadata.get("history_note")
+
+    return output
+
+
+def predict_upcoming_fixtures_for_league(
+    league: str,
+    limit: int = 10,
+) -> List[Dict]:
+    """
+    Fetch upcoming fixtures for a league, generate live features,
+    run predictions, and return ranked outputs.
+    """
+    artifacts = load_all_artifacts()
+    historical_df = load_historical_matches()
+
+    fixtures = fetch_upcoming_fixtures(league)
+    fixtures = filter_fixtures_with_complete_odds(fixtures)
+    fixtures = fixtures[:limit]
+
+    outputs = []
+    for fixture in fixtures:
+        try:
+            prediction = build_live_prediction_output(
+                fixture=fixture,
+                historical_df=historical_df,
+                artifacts=artifacts,
+            )
+            outputs.append(prediction)
+        except Exception as exc:
+            outputs.append(
+                {
+                    "match": fixture,
+                    "error": str(exc),
+                }
+            )
+
+    return outputs
 
 def demo_predict_latest_matches(n: int = 10) -> None:
     """
@@ -384,9 +453,52 @@ def demo_predict_latest_matches(n: int = 10) -> None:
         )
         print("-" * 110)
 
+def demo_predict_upcoming(league: str = "EPL", limit: int = 5) -> None:
+    """
+    Demo upcoming fixture predictions for one league.
+    """
+    outputs = predict_upcoming_fixtures_for_league(league=league, limit=limit)
+
+    print("=" * 110)
+    print(f"UPCOMING MATCH PREDICTIONS - {league.upper()}")
+    print("=" * 110)
+
+    for output in outputs:
+        if "error" in output:
+            print(f"ERROR for fixture: {output['match']}")
+            print(output["error"])
+            print("-" * 110)
+            continue
+
+        match = output["match"]
+        primary = output["primary_prediction"]
+        secondary = output["secondary_prediction"]
+
+        print(f"{match['date']} | {match['league']} | {match['home_team']} vs {match['away_team']}")
+        print(
+            f"Odds -> Home={match['odds']['home_win']}, "
+            f"Draw={match['odds']['draw']}, "
+            f"Away={match['odds']['away_win']}"
+        )
+
+        if primary:
+            print(
+                f"Primary Prediction: {primary['market']} - {primary['selection']} "
+                f"({primary['confidence']:.3f}, {primary['confidence_band']})"
+            )
+        if secondary:
+            print(
+                f"Secondary Prediction: {secondary['market']} - {secondary['selection']} "
+                f"({secondary['confidence']:.3f}, {secondary['confidence_band']})"
+            )
+
+        if output.get("prediction_note"):
+            print(f"Note: {output['prediction_note']}")
+
+        print("-" * 110)
 
 def main() -> None:
-    demo_predict_latest_matches(n=10)
+    demo_predict_upcoming(league="EPL", limit=5)
 
 
 if __name__ == "__main__":
