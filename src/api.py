@@ -172,15 +172,28 @@ def predict_upcoming(
     outputs = predict_upcoming_fixtures_for_league(league=league, limit=limit)
     return outputs
 
+import os
+from fastapi import HTTPException
+
+TELEGRAM_SECRET_KEY = os.getenv("TELEGRAM_SECRET_KEY")
+
+
 @app.post("/telegram/send-league")
 def send_telegram_league_predictions(
-    league: str = Query(default="EPL", description="League code, e.g. EPL"),
-    limit: int = Query(default=5, ge=1, le=10),
-) -> Dict[str, Any]:
-    result = send_league_predictions_to_telegram(league=league, limit=limit)
+    league: str = Query(default="EPL"),
+    limit: int = Query(default=5),
+    secret: str = Query(...)
+):
+    if secret != TELEGRAM_SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    result = send_league_predictions_to_telegram(
+        league=league,
+        limit=limit
+    )
+
     return {
         "status": "sent",
-        "league": league.upper(),
-        "limit": limit,
-        "telegram_response": result,
+        "league": league,
+        "result": result
     }
